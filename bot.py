@@ -1,4 +1,5 @@
-import requests, json, os, re
+import cloudscraper, requests, json, os, re
+from bs4 import BeautifulSoup
 from datetime import datetime, timezone
 
 WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
@@ -16,40 +17,44 @@ def save_seen(seen):
         json.dump(sorted(list(seen)), f)
 
 def get_free_to_keep_games():
-    headers = {'User-Agent': 'SteamFreeBot/1.0 Discord notification bot'}
+    scraper = cloudscraper.create_scraper(
+        browser={'browser': 'chrome', 'platform': 'windows'}
+    )
     try:
-        r = requests.get(
-            'https://www.reddit.com/r/FreeGamesOnSteam/new.json?limit=25',
-            headers=headers, timeout=15
-        )
+        r = scraper.get('https://steamdb.info/upcoming/free/', timeout=30)
         r.raise_for_status()
-        posts = r.json()['data']['children']
+        print(f"✅ SteamDB OK (status {r.status_code})")
     except Exception as e:
-        print(f"❌ Erreur Reddit: {e}")
+        print(f"❌ SteamDB bloqué: {e}")
         return []
 
+    soup = BeautifulSoup(r.text, 'html.parser')
+    print(f"Page: {soup.title.text if soup.title else 'no title'}")
+
     games = []
-    for post in posts:
-        d = post['data']
-        title = d.get('title', '')
-        if 'free to keep' not in title.lower():
-            continue  # ignore les weekends d'essai
-
-        post_id = d.get('id', '')
-        url = d.get('url', '')
-        reddit_url = f"https://reddit.com{d.get('permalink', '')}"
-        game_name = re.sub(r'\[.*?\]|\(.*?\)', '', title).strip(' -–')
-        match = re.search(r'store\.steampowered\.com/app/(\d+)', url)
-        app_id = match.group(1) if match else None
-
-        games.append({
-            'id': post_id,
-            'name': game_name or title,
-            'store_url': url if app_id else None,
-            'steamdb_url': f"https://steamdb.info/app/{app_id}/" if app_id else "https://steamdb.info/upcoming/free/",
-            'image': f"https://cdn.akamai.steamstatic.com/steam/apps/{app_id}/header.jpg" if app_id else None,
-            'reddit_url': reddit_url
-        })
+    for el in soup.find_all(string=re.compile(r'free\s+to\s+keep', re.IGNORECASE)):
+        parent = el.parent
+        for _ in range(10):
+            if parent is None:
+                break
+            app_id = parent.get('data-appid') or parent.get('data-ds-appid')
+            if not app_id:
+                link = parent.find('a', href=re.compile(r'/app/\d+'))
+                if link:
+                    m = re.search(r'/app/(\d+)', link['href'])
+                    if m:
+                        app_id = m.group(1)
+            if app_id and not any(g['id'] == app_id for g in games):
+                name_el = parent.find(['h2', 'h3', 'strong'])
+                name = name_el.text.strip() if name_el else f"App {app_id}"
+                games.append({
+                    'id': app_id, 'name': name,
+                    'store_url': f"https://store.steampowered.com/app/{app_id}/",
+                    'steamdb_url': f"https://steamdb.info/app/{app_id}/",
+                    'image': f"https://cdn.akamai.steamstatic.com/steam/apps/{app_id}/header.jpg"
+                })
+                break
+            parent = parent.parent
 
     print(f"🔍 {len(games)} jeu(x) Free to Keep trouvé(s)")
     return games
@@ -58,23 +63,14 @@ def send_notification(game):
     if not WEBHOOK_URL:
         print("❌ DISCORD_WEBHOOK_URL non défini")
         return
-
-    links = []
-    if game.get('store_url'):
-        links.append(f"[🛒 Page Steam]({game['store_url']})")
-    links.append(f"[📊 SteamDB]({game['steamdb_url']})")
-    links.append(f"[💬 Reddit]({game['reddit_url']})")
-
     embed = {
         "title": f"🎮 Free to Keep : {game['name']}",
-        "description": "Gratuit à garder définitivement !\n\n" + " · ".join(links),
+        "description": f"Gratuit à garder définitivement !\n\n[🛒 Steam]({game['store_url']}) · [📊 SteamDB]({game['steamdb_url']})",
         "color": 0x00adee,
-        "footer": {"text": "Source: r/FreeGamesOnSteam"},
+        "image": {"url": game['image']},
+        "footer": {"text": "steamdb.info/upcoming/free/"},
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    if game.get('image'):
-        embed["image"] = {"url": game['image']}
-
     r = requests.post(WEBHOOK_URL, json={
         "username": "Steam Free Games",
         "content": "@everyone 🎮 Jeu **Free to Keep** sur Steam !",
