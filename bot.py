@@ -32,6 +32,8 @@ def get_free_to_keep_games():
 
     games = []
     for g in giveaways:
+        if not isinstance(g, dict):
+            continue
         if g.get('status', '').lower() != 'active':
             continue
         url = g.get('open_giveaway', '') or g.get('open_giveaway_url', '')
