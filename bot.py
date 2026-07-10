@@ -16,42 +16,43 @@ def save_seen(seen):
         json.dump(sorted(list(seen)), f)
 
 def get_free_to_keep_games():
-    try:
-        r = requests.get(
-            'https://www.gamerpower.com/api/giveaways',
-            params={'platform': 'steam', 'type': 'game'},
-            headers={'User-Agent': 'SteamFreeBot/1.0'},
-            timeout=15
-        )
-        r.raise_for_status()
-        giveaways = r.json()
-        print(f"✅ GamerPower OK: {len(giveaways)} jeu(x) trouvé(s)")
-    except Exception as e:
-        print(f"❌ Erreur GamerPower: {e}")
-        return []
+    PLATFORMS = ['steam', 'epic-games-store', 'gog', 'itch.io']
+    all_games = []
 
-    games = []
-    for g in giveaways:
-        if not isinstance(g, dict):
-            continue
-        if g.get('status', '').lower() != 'active':
-            continue
-        url = g.get('open_giveaway', '') or g.get('open_giveaway_url', '')
-        match = re.search(r'store\.steampowered\.com/app/(\d+)', url)
-        app_id = match.group(1) if match else None
-        games.append({
-            'id': str(g['id']),
-            'name': g.get('title', 'Unknown'),
-            'worth': g.get('worth', '?'),
-            'end_date': g.get('end_date', 'N/A'),
-            'store_url': url if app_id else None,
-            'steamdb_url': f"https://steamdb.info/app/{app_id}/" if app_id else "https://steamdb.info/upcoming/free/",
-            'image': g.get('thumbnail', '')
-        })
+    for platform in PLATFORMS:
+        try:
+            r = requests.get(
+                'https://www.gamerpower.com/api/giveaways',
+                params={'platform': platform, 'type': 'game'},
+                headers={'User-Agent': 'SteamFreeBot/1.0'},
+                timeout=15
+            )
+            r.raise_for_status()
+            giveaways = r.json()
+            if not isinstance(giveaways, list):
+                continue
+            print(f"✅ {platform}: {len(giveaways)} jeu(x)")
+            for g in giveaways:
+                if not isinstance(g, dict):
+                    continue
+                if g.get('status', '').lower() != 'active':
+                    continue
+                url = g.get('open_giveaway', '') or g.get('open_giveaway_url', '')
+                all_games.append({
+                    'id': str(g['id']),
+                    'name': g.get('title', 'Unknown'),
+                    'worth': g.get('worth', '?'),
+                    'end_date': g.get('end_date', 'N/A'),
+                    'platform': platform,
+                    'store_url': url,
+                    'image': g.get('thumbnail', '')
+                })
+        except Exception as e:
+            print(f"❌ Erreur {platform}: {e}")
 
-    print(f"🔍 {len(games)} jeu(x) gratuits à garder sur Steam")
-    return games
-
+    print(f"🔍 {len(all_games)} jeu(x) gratuits au total")
+    return all_games
+    
 def send_notification(game):
     if not WEBHOOK_URL:
         print("❌ DISCORD_WEBHOOK_URL non défini")
@@ -61,7 +62,7 @@ def send_notification(game):
         links.append(f"[🛒 Steam]({game['store_url']})")
     links.append(f"[📊 SteamDB]({game['steamdb_url']})")
     embed = {
-        "title": f"🎮 Free to Keep : {game['name']}",
+       "title": f"🎮 Free to Keep : {game['name']} ({game['platform']})",
         "description": (
             f"Prix habituel : ~~{game['worth']}~~ → **Gratuit !**\n"
             f"Expire : {game['end_date']}\n\n" + " · ".join(links)
