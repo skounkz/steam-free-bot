@@ -18,7 +18,6 @@ def save_seen(seen):
 def get_free_to_keep_games():
     PLATFORMS = ['steam', 'epic-games-store', 'gog', 'itch.io']
     all_games = []
-
     for platform in PLATFORMS:
         try:
             r = requests.get(
@@ -49,23 +48,19 @@ def get_free_to_keep_games():
                 })
         except Exception as e:
             print(f"❌ Erreur {platform}: {e}")
-
     print(f"🔍 {len(all_games)} jeu(x) gratuits au total")
     return all_games
-    
+
 def send_notification(game):
     if not WEBHOOK_URL:
         print("❌ DISCORD_WEBHOOK_URL non défini")
         return
-    links = []
-    if game.get('store_url'):
-        links.append(f"[🛒 Steam]({game['store_url']})")
-    links.append(f"[📊 SteamDB]({game['steamdb_url']})")
     embed = {
-       "title": f"🎮 Free to Keep : {game['name']} ({game['platform']})",
+        "title": f"🎮 Free to Keep : {game['name']} ({game['platform']})",
         "description": (
             f"Prix habituel : ~~{game['worth']}~~ → **Gratuit !**\n"
-            f"Expire : {game['end_date']}\n\n" + " · ".join(links)
+            f"Expire : {game['end_date']}\n\n"
+            f"[🛒 Récupérer le jeu]({game['store_url']})"
         ),
         "color": 0x00adee,
         "thumbnail": {"url": game['image']},
@@ -73,8 +68,8 @@ def send_notification(game):
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     r = requests.post(WEBHOOK_URL, json={
-        "username": "Steam Free Games",
-        "content": "@everyone 🎮 Jeu **Free to Keep** sur Steam !",
+        "username": "Free Games Bot",
+        "content": "@everyone 🎮 Jeu **Free to Keep** disponible !",
         "embeds": [embed]
     }, timeout=10)
     print(f"{'✅' if r.status_code in (200,204) else '❌'} {game['name']} ({r.status_code})")
